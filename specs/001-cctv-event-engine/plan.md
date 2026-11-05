@@ -1,10 +1,6 @@
 # Sequential implementation roadmap
 
-**Status:** No full-stage acceptance gate has passed. At the user's request, an
-experimental upload-to-events slice spanning parts of 02/03/05/06 is now locally
-implemented in [002 — Clip workbench](../002-clip-workbench/spec.md), with
-[verification evidence](../002-clip-workbench/results.md). The research probe is
-not Plan 01 completion; start there for the next quality/performance milestone.
+**Status:** [Plan 01](plans/01-benchmark.md) benchmark harness, dataset/license ledger, INT8 calibration analysis, and Pareto profile selection are complete ([results/01.md](results/01.md)); production accuracy release gates remain blocked on missing long-PTS India field footage. At the user's request, an experimental upload-to-events slice spanning parts of 02/03/05/06 is also locally implemented in [002 — Clip workbench](../002-clip-workbench/spec.md), with [verification evidence](../002-clip-workbench/results.md). Next sequential milestone: [Plan 02 — Contracts and durable storage](plans/02-contracts-storage.md).
 **Specification:** [spec.md](spec.md) · [architecture](architecture.md) · [data model](data-model.md) · [research](research.md)
 
 ## How to execute

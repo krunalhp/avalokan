@@ -1,6 +1,6 @@
 # Plan 01 — Establish the India CCTV benchmark before choosing the fastest model
 
-**Status:** Not started. **Depends on:** existing orb setup. **Delivers:** a repeatable benchmark and dataset/license ledger, not a production model claim.
+**Status:** Harness, dataset/license ledger, INT8 comparison, and Pareto profile completed locally in [results/01.md](../results/01.md); production activity accuracy gates remain blocked pending authorized long-PTS India field recordings. **Depends on:** existing orb setup. **Delivers:** a repeatable benchmark and dataset/license ledger, not a production model claim.
 
 ## Scope and decisions
 
