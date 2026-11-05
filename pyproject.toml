@@ -1,0 +1,59 @@
+[project]
+name = "avalokan"
+version = "0.1.0"
+description = "CCTV video analysis notebooks"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "av>=14,<17",
+    "comet-ml>=3,<4",
+    "fastapi>=0.115,<1",
+    "httpx>=0.28,<1",
+    "ipykernel>=6,<8",
+    "jupyterlab>=4,<5",
+    "nbconvert>=7,<8",
+    "numpy>=1.26,<3",
+    "onnx>=1.17,<2",
+    "onnxruntime>=1.20,<2",
+    "onnxslim>=0.1,<1",
+    "opencv-python>=4.10,<5",
+    "pip>=25,<27",
+    "psycopg[binary]>=3.2,<4",
+    "python-multipart>=0.0.20,<1",
+    "scipy>=1.14,<2",
+    "tensorboard>=2.18,<3",
+    "torch>=2.6,<3",
+    "torchvision>=0.21,<1",
+    "ultralytics>=8.3,<9",
+    "uvicorn>=0.34,<1",
+]
+
+[tool.uv]
+package = false
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+
+# Orbs use CPU wheels; avoid downloading unused CUDA libraries.
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[dependency-groups]
+dev = [
+    "pytest>=8,<10",
+    "ruff>=0.11,<1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

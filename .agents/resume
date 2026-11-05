@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Orb resume for the Avalokan notebook repository.
-# There are no backing services or user-scoped credentials to reconnect, so
-# this only sanity-checks the preinstalled toolchain and exits quickly.
-
-python3 -c 'import torch, cv2, ultralytics' >/dev/null 2>&1 \
-  && echo "[resume] notebook toolchain OK" \
-  || echo "[resume] WARNING: notebook toolchain import failed; rerun .agents/setup"
-exit 0
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Amp supervises declared services separately. Do not install on resume.
+if [[ ! -x "$repo_root/.venv/bin/python" ]]; then
+    echo "[resume] Python environment missing; run .agents/setup" >&2
+    exit 1
+fi
+echo "[resume] Avalokan Python environment ready"

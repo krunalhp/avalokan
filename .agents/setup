@@ -1,49 +1,61 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Orb setup for the Avalokan notebook repository.
-# Installs the Python toolchain the notebooks need (torch CPU, ultralytics,
-# OpenCV, Jupyter) so fresh orbs can run YOLO11_Tutorial.ipynb and
-# VideoAnalysis.ipynb without reinstalling anything.
-# Must be non-interactive, idempotent, and finish well under 20 minutes.
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+SECONDS=0
 
-step() { printf '\n[setup] %s (%ss elapsed)\n' "$*" "$SECONDS"; }
-
-step "Checking system packages (ffmpeg for video work)"
-if ! command -v ffmpeg >/dev/null 2>&1; then
-  sudo apt-get update -qq
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ffmpeg
-else
-  echo "ffmpeg already present: $(command -v ffmpeg)"
+echo "[setup] Checking video and database system packages"
+missing=()
+for package in libgl1 libglib2.0-0 ffmpeg postgresql-15; do
+    if ! dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -qx 'install ok installed'; then
+        missing+=("$package")
+    fi
+done
+if ((${#missing[@]})); then
+    sudo apt-get update -qq
+    sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}"
 fi
+echo "[setup] System libraries ready (${SECONDS}s elapsed)"
 
-step "Checking uv package manager"
-if ! command -v uv >/dev/null 2>&1; then
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  export PATH="$HOME/.local/bin:$PATH"
+# uv is provided by the orb base image. Keep Python and packages pinned in Git.
+uv python install "$(cat .python-version)"
+uv sync --locked
+echo "[setup] Notebook dependencies ready (${SECONDS}s elapsed)"
+
+uv tool install 'specify-cli==1.2.0'
+echo "[setup] Spec Kit ready (${SECONDS}s elapsed)"
+
+mkdir -p .data/socket .data/media
+chmod 700 .data .data/socket
+if [[ ! -f .data/postgres/PG_VERSION ]]; then
+    /usr/lib/postgresql/15/bin/initdb -D .data/postgres --auth-local=trust --auth-host=scram-sha-256 --no-instructions
 fi
-uv --version
+PYTHONPATH=src uv run --locked python -m avalokan.install_model
+npm --prefix web ci --no-audit --no-fund
+npm --prefix web run build
+echo "[setup] Workbench, model and local database prepared (${SECONDS}s elapsed)"
 
-step "Installing CPU-only torch (PyTorch CPU index)"
-# Install torch first so ultralytics does not pull the much larger CUDA build.
-if python3 -c 'import torch' 2>/dev/null; then
-  echo "torch already installed: $(python3 -c 'import torch; print(torch.__version__)')"
-else
-  uv pip install --system torch --index-url https://download.pytorch.org/whl/cpu
-fi
+# Amp and supervised services each start in a separate login shell.
+# Activate only inside this checkout, never in unrelated repositories.
+marker="# Avalokan orb Python environment: $repo_root"
+if ! grep -Fqx "$marker" "$HOME/.bash_profile" 2>/dev/null; then
+    cat >> "$HOME/.bash_profile" <<EOF
 
-step "Installing ultralytics, OpenCV, and Jupyter"
-# ultralytics brings numpy and its other runtime deps; opencv-python is listed
-# for clarity since VideoAnalysis.ipynb uses cv2 directly.
-uv pip install --system ultralytics opencv-python jupyterlab ipykernel
-
-step "Verifying imports"
-python3 - <<'EOF'
-import cv2, numpy, torch, ultralytics
-print(f"torch {torch.__version__} (cuda available: {torch.cuda.is_available()})")
-print(f"ultralytics {ultralytics.__version__}")
-print(f"opencv {cv2.__version__}")
-print(f"numpy {numpy.__version__}")
+$marker
+case "\$PWD/" in
+    "$repo_root/"*)
+        if [[ -f "$repo_root/.venv/bin/activate" ]] &&
+            [[ "\${VIRTUAL_ENV:-}" != "$repo_root/.venv" || "\$(command -v python || true)" != "$repo_root/.venv/bin/python" ]]; then
+            source "$repo_root/.venv/bin/activate"
+        fi
+        case ":\$PATH:" in
+            *":\$HOME/.local/bin:"*) ;;
+            *) export PATH="\$HOME/.local/bin:\$PATH" ;;
+        esac
+        ;;
+esac
 EOF
+fi
 
-step "Setup complete"
+echo "[setup] Ready (${SECONDS}s total)"
