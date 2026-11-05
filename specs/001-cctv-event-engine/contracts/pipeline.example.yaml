@@ -1,0 +1,45 @@
+# Proposed configuration; not runnable until Plans 02–05 are implemented.
+schema_version: 1
+instance:
+  id: edge-demo-01
+  allowed_activities: [line.crossed, zone.dwell, zone.intrusion]
+  profile: low_compute
+  cpu_threads: 2
+  max_frame_buffer_mb: 128
+  max_event_spool_mb: 1024
+camera:
+  id: gate-01
+  site_id: demo-site
+  source_secret_ref: cameras/gate-01/rtsp
+  display_timezone: Asia/Kolkata
+  calibration_version: gate-01-v1
+  analysis_stream: substream
+models:
+  objects:
+    artifact_id: yolox-nano-onnx-reviewed
+    sha256: c789161ed43c8269fcd4e67c67eeeb4e80c622da2eb296a20bc6007bd18a0b7d
+    runtime: onnxruntime-cpu
+    input_shape: [1, 3, 416, 416]
+    inference_threads: 1
+pipelines:
+  - id: gate-count
+    plugin: geometry.line
+    version: "1"
+    allowed_activities: [line.crossed]
+    observations: objects
+    parameters:
+      line_id: entrance
+      classes: [person, car, motorcycle]
+  - id: loading-zone
+    plugin: geometry.dwell
+    version: "1"
+    allowed_activities: [zone.dwell]
+    observations: objects
+    parameters:
+      zone_id: loading-zone
+      classes: [person]
+      threshold_ms: 60000
+      max_confirmation_gap_ms: 2500
+# Plugin manifests supply cadence floors. Reject this profile if it cannot
+# satisfy max_confirmation_gap_ms; do not silently honor an incompatible rate.
+# Same observations key means share only if resolved input contracts match.
