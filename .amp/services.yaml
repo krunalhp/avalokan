@@ -1,0 +1,23 @@
+services:
+  avalokan-db:
+    command: /usr/lib/postgresql/15/bin/postgres -D .data/postgres -k "$PWD/.data/socket" -p 55432 -h 127.0.0.1
+    port: 55432
+    platforms: [linux]
+  avalokan:
+    command: >-
+      for i in $(seq 1 60); do
+        pg_isready -h "$PWD/.data/socket" -p 55432 -q && break;
+        sleep 1;
+      done;
+      exec uv run --locked uvicorn avalokan.api:app --app-dir src --host 127.0.0.1 --port "$PORT"
+    port: 8000
+    env:
+      PYTHONPATH: src
+      AVALOKAN_DEMO: "1"
+      AVALOKAN_WORKER: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      OMP_NUM_THREADS: "1"
+    health: /health
+    portal:
+      title: Avalokan clip workbench
+      description: Experimental local demo. All thread portal viewers share uploaded clips. Do not upload sensitive footage. Token authentication is required outside demo mode.

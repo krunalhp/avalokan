@@ -1,0 +1,21 @@
+{
+  "name": "avalokan-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Avalokan CCTV clip workbench UI (upload, analyze, review)",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "preact": "^10.29.8"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.6",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.7"
+  }
+}
