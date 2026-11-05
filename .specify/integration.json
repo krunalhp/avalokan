@@ -1,0 +1,15 @@
+{
+  "version": "1.2.0",
+  "integration_state_schema": 1,
+  "installed_integrations": [
+    "amp"
+  ],
+  "integration_settings": {
+    "amp": {
+      "script": "sh",
+      "invoke_separator": "."
+    }
+  },
+  "integration": "amp",
+  "default_integration": "amp"
+}
