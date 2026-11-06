@@ -15,6 +15,7 @@ services:
       PYTHONPATH: src
       AVALOKAN_DEMO: "1"
       AVALOKAN_WORKER: "1"
+      AVALOKAN_YTDLP_COOKIES_FROM_BROWSER: chrome
       OPENBLAS_NUM_THREADS: "1"
       OMP_NUM_THREADS: "1"
     health: /health

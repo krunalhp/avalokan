@@ -39,6 +39,14 @@ class Settings:
         return Path(override) if override else self.data / "secrets/youtube-cookies.txt"
 
     @property
+    def cookies_from_browser(self):
+        """Read cookies from a signed-in desktop browser profile instead of a file.
+
+        Value is passed to yt-dlp --cookies-from-browser, e.g. "chrome".
+        """
+        return os.getenv("AVALOKAN_YTDLP_COOKIES_FROM_BROWSER", "")
+
+    @property
     def allowed(self):
         from .activities import REGISTRY
 

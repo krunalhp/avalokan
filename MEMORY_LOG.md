@@ -43,12 +43,27 @@ diagnosed issue or shipped change.
 - **Verified:** Trace lines observed in `amp orb service logs avalokan` across a
   full URL→job→events run.
 
+## 2026-11-06 — Desktop sign-in flow for YouTube cookies
+
+- **Symptom:** User reported "not accepting url" for YouTube footage. Diagnosis via
+  the portal UI: the form accepts and submits the URL correctly; the ingest fails
+  because YouTube blocks anonymous downloads from the orb's datacenter IP on every
+  player client.
+- **Change:** Cookie sourcing now supports two modes: a Netscape cookies file
+  (`.data/secrets/youtube-cookies.txt` or `AVALOKAN_YTDLP_COOKIES`) or the signed-in
+  Desktop Chrome profile (`AVALOKAN_YTDLP_COOKIES_FROM_BROWSER=chrome` in
+  `.amp/services.yaml`, read via `yt-dlp --cookies-from-browser`). New
+  `.amp/open-youtube-signin.sh` launches Desktop Chrome with its profile at
+  `~/.config/google-chrome` so the user can sign into YouTube once and the ingest
+  worker reuses those cookies.
+- **Verified:** Workbench tests pass; service restarted with the env flag.
+
 ## 2026-11-06 — Known open issues (not yet fixed)
 
 - **YouTube blocks datacenter downloads:** all player clients return "Sign in to
-  confirm you're not a bot" from this orb's IP. Cookie support is wired
-  (`.data/secrets/youtube-cookies.txt`, never committed); awaiting the user's
-  cookies file, then URL ingest of YouTube links will work.
+  confirm you're not a bot" from this orb's IP. Cookie support is wired (file or
+  Desktop Chrome profile); awaiting the user's one-time YouTube sign-in, then URL
+  ingest of YouTube links will work.
 - **Two pre-existing benchmark test failures** (`tests/test_benchmark.py::
   test_partition_validator_rejects_camera_scene_network_and_near_duplicate_leakage`,
   `test_int8_calibration_rejects_non_images_and_conv_qdq_preserves_scores`): the

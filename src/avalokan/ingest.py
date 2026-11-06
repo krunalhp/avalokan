@@ -21,13 +21,16 @@ FORMAT_COLUMN = "mov"  # yt-dlp merges to MP4, which ffprobe reads as the mov de
 _FORMAT = "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080]+ba/b[ext=mp4]/b"
 
 
-def fetch_title(url: str, trace_id: str, cookies: Path | None = None) -> str:
+def fetch_title(url: str, trace_id: str, cookies: Path | None = None,
+                from_browser: str = "") -> str:
     command = [
         "yt-dlp", "--no-playlist", "--simulate", "--no-warnings",
         "--print", "%(title).200s", "--", url,
     ]
     if cookies and cookies.is_file():
         command += ["--cookies", str(cookies)]
+    elif from_browser:
+        command += ["--cookies-from-browser", from_browser]
     result = subprocess.run(command, capture_output=True, text=True, timeout=60)
     title = result.stdout.strip().splitlines()[0] if result.returncode == 0 and result.stdout.strip() else ""
     if not title:
@@ -55,6 +58,10 @@ def download_media(settings: Settings, ingest_id: str, url: str, trace_id: str) 
         if cookies.is_file():
             command += ["--cookies", str(cookies)]
             trace(trace_id, "ingest.using_cookies")
+        elif settings.cookies_from_browser:
+            command += ["--cookies-from-browser", settings.cookies_from_browser]
+            trace(trace_id, "ingest.using_browser_cookies",
+                  browser=settings.cookies_from_browser)
         result = subprocess.run(
             command,
             capture_output=True,
@@ -66,14 +73,15 @@ def download_media(settings: Settings, ingest_id: str, url: str, trace_id: str) 
             message = detail[-1][:300] if detail else "download produced no file"
             if "Sign in to confirm" in (result.stderr or "") or "Sign in to confirm" in message:
                 message = (
-                    "The video host requires sign-in from this server's IP. Export your "
-                    "browser cookies (cookies.txt) and save it to "
-                    ".data/secrets/youtube-cookies.txt, then retry."
+                    "The video host requires sign-in from this server's IP. Sign in to "
+                    "YouTube once from the Desktop browser (open the sign-in link from the "
+                    "thread), or save a cookies.txt to .data/secrets/youtube-cookies.txt, "
+                    "then retry."
                 )
             raise ValueError(message)
         trace(trace_id, "ingest.download.done", size_bytes=target.stat().st_size)
 
-        title = fetch_title(url, trace_id, cookies)
+        title = fetch_title(url, trace_id, cookies, settings.cookies_from_browser)
         metadata = probe(target, FORMAT_COLUMN, settings.max_duration)
         digest = hashlib.sha256(target.read_bytes()).hexdigest()
         with connect(settings) as conn:
