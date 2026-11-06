@@ -49,6 +49,11 @@ class SessionRequest(BaseModel):
     token: str = Field(min_length=1, max_length=1000)
 
 
+class IngestRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    url: str = Field(min_length=13, max_length=2048, pattern=r"^https?://")
+
+
 class EventCandidate(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     activity: str
@@ -77,6 +82,15 @@ class MediaRecord(BaseModel):
     size_bytes: int
     sha256: str
     playback_ready: bool
+    created_at: datetime
+
+
+class IngestRecord(BaseModel):
+    id: UUID
+    url: str
+    status: Literal["downloading", "ready", "failed"]
+    error: str | None
+    media: MediaRecord | None
     created_at: datetime
 
 

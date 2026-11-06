@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import {
   api,
+  ApiError,
   errorText,
   isAbort,
   newIdempotencyKey,
@@ -57,7 +58,9 @@ const inRange = (v: number, lo: number, hi: number) => Number.isFinite(v) && v >
 
 export function UploadForm({ caps, selectedJob, onJobCreated }: Props) {
   const [file, setFile] = useState<File | null>(null);
-  const [source, setSource] = useState<"file" | "selected">("file");
+  const [source, setSource] = useState<"file" | "url" | "selected">("file");
+  const [videoUrl, setVideoUrl] = useState("");
+  const [ingestStatus, setIngestStatus] = useState<string | null>(null);
   const [activities, setActivities] = useState<string[]>(() =>
     caps.activities.some((a) => a.id === DEFAULT_ACTIVITY) ? [DEFAULT_ACTIVITY] : [],
   );
@@ -111,6 +114,10 @@ export function UploadForm({ caps, selectedJob, onJobCreated }: Props) {
           errs.push(`File is ${fmtBytes(file.size)}; limit is ${fmtBytes(caps.max_upload_bytes)}.`);
       }
     }
+    if (source === "url") {
+      if (!/^https?:\/\/\S+$/.test(videoUrl.trim()))
+        errs.push("Enter a valid video URL (http/https).");
+    }
     if (!classes.length) errs.push("Select at least one object class.");
     if (!inRange(confidence, 0.1, 0.9)) errs.push("Confidence threshold must be 0.1–0.9.");
     if (!inRange(dwell, 1, 600)) errs.push("Dwell must be 1–600 seconds.");
@@ -137,6 +144,25 @@ export function UploadForm({ caps, selectedJob, onJobCreated }: Props) {
       let mediaId: string;
       if (source === "selected" && selectedJob) {
         mediaId = selectedJob.media_id;
+      } else if (source === "url") {
+        const url = videoUrl.trim();
+        setPhase({ kind: "starting" });
+        setIngestStatus("Contacting video source…");
+        const key = newIdempotencyKey();
+        let pending = await api.ingestUrl(url, key, ctrl.signal);
+        while (pending.status === "downloading") {
+          await new Promise((r) => setTimeout(r, 2000));
+          pending = await api.ingest(pending.id, ctrl.signal);
+          setIngestStatus(
+            pending.media
+              ? "Processing downloaded video…"
+              : "Downloading video from URL…",
+          );
+        }
+        if (pending.status === "failed" || !pending.media) {
+          throw new ApiError(422, pending.error || "Could not fetch a usable video from that URL.");
+        }
+        mediaId = pending.media.id;
       } else {
         const f = file!;
         if (uploadedRef.current?.file === f) {
@@ -174,6 +200,7 @@ export function UploadForm({ caps, selectedJob, onJobCreated }: Props) {
     } finally {
       abortRef.current = null;
       setPhase({ kind: "idle" });
+      setIngestStatus(null);
     }
   }
 
@@ -185,21 +212,43 @@ export function UploadForm({ caps, selectedJob, onJobCreated }: Props) {
         New analysis
       </h2>
 
-      {selectedJob && (
-        <fieldset class="segmented" disabled={busy}>
-          <legend class="sr-only">Clip source</legend>
+      <fieldset class="segmented" disabled={busy}>
+        <legend class="sr-only">Clip source</legend>
+        <label>
+          <input type="radio" name="source" checked={source === "file"} onChange={() => { setSource("file"); setIngestStatus(null); }} />
+          <span>Upload file</span>
+        </label>
+        {caps.url_ingest && (
           <label>
-            <input type="radio" name="source" checked={source === "file"} onChange={() => setSource("file")} />
-            <span>Upload file</span>
+            <input type="radio" name="source" checked={source === "url"} onChange={() => { setSource("url"); setIngestStatus(null); }} />
+            <span>From URL</span>
           </label>
+        )}
+        {selectedJob && (
           <label title={selectedJob.media_name}>
-            <input type="radio" name="source" checked={source === "selected"} onChange={() => setSource("selected")} />
+            <input type="radio" name="source" checked={source === "selected"} onChange={() => { setSource("selected"); setIngestStatus(null); }} />
             <span>Re-analyze selected</span>
           </label>
-        </fieldset>
-      )}
+        )}
+      </fieldset>
 
-      {source === "file" ? (
+      {source === "url" ? (
+        <label class="field">
+          <span>Video URL (YouTube and other sites)</span>
+          <input
+            type="url"
+            placeholder="https://www.youtube.com/watch?v=…"
+            value={videoUrl}
+            disabled={busy}
+            aria-label="Video URL"
+            onInput={(e) => {
+              setVideoUrl((e.currentTarget as HTMLInputElement).value);
+              setError(null);
+            }}
+          />
+          {ingestStatus && <small class="muted">{ingestStatus}</small>}
+        </label>
+      ) : source === "file" ? (
         <label class="dropzone">
           <span class="dropzone-title">{file ? file.name : "Choose CCTV clip"}</span>
           <small class="muted">

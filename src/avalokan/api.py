@@ -6,6 +6,7 @@ import secrets
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -15,12 +16,15 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from psycopg.types.json import Jsonb
 
+from . import ingest as ingest_module
 from .activities import REGISTRY
 from .contracts import (
     CLASSES,
     AnalysisConfig,
     EventDetail,
     EventRecord,
+    IngestRecord,
+    IngestRequest,
     JobList,
     JobRecord,
     JobRequest,
@@ -34,6 +38,9 @@ from .contracts import (
 from .db import EVENT_SELECT, JOB_SELECT, connect, migrate
 from .media import FORMATS, probe
 from .settings import MODEL_SHA256, ROOT, Settings
+from .tracing import configure as configure_tracing
+from .tracing import event as trace
+from .tracing import new_trace_id
 
 
 def required(row):
@@ -60,6 +67,9 @@ def page(rows, limit):
 
 def create_app(settings=None):
     settings = settings or Settings()
+    configure_tracing()
+    ingest_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ingest")
+    ingest_trace = new_trace_id("svc")
 
     @asynccontextmanager
     async def lifespan(app):
@@ -70,6 +80,7 @@ def create_app(settings=None):
         settings.data.mkdir(parents=True, exist_ok=True)
         (settings.data / "media").mkdir(exist_ok=True)
         migrate(settings)
+        trace(ingest_trace, "api.start", demo=settings.demo, pid=os.getpid())
         worker = None
         if os.getenv("AVALOKAN_WORKER") == "1":
             worker = subprocess.Popen([sys.executable, "-m", "avalokan.worker"])
@@ -113,6 +124,9 @@ def create_app(settings=None):
     @app.middleware("http")
     async def guard(request: Request, call_next):
         path = request.url.path
+        trace_id = request.headers.get("x-trace-id") or new_trace_id("req")
+        request.state.trace_id = trace_id
+        started = time.perf_counter()
         if (
             request.method not in {"GET", "HEAD", "OPTIONS"}
             and request.headers.get("sec-fetch-site") == "cross-site"
@@ -120,6 +134,7 @@ def create_app(settings=None):
             return JSONResponse({"detail": "Cross-site mutation refused"}, status_code=403)
         protected = path.startswith("/v1/") or path in {"/docs", "/openapi.json", "/redoc"}
         if protected and path != "/v1/session" and not authenticated(request):
+            trace(trace_id, "http.unauthorized", method=request.method, path=path, level="warn")
             return JSONResponse({"detail": "Authentication required"}, status_code=401)
         if request.method in {"POST", "PUT", "PATCH"}:
             length = request.headers.get("content-length")
@@ -128,10 +143,15 @@ def create_app(settings=None):
                 if length is None:
                     return JSONResponse({"detail": "Content-Length required"}, status_code=411)
                 if not 0 <= int(length) <= maximum:
+                    trace(trace_id, "http.rejected", method=request.method, path=path,
+                          detail="size limit", level="warn")
                     return JSONResponse({"detail": "Request exceeds size limit"}, status_code=413)
             except ValueError:
                 return JSONResponse({"detail": "Invalid Content-Length"}, status_code=400)
         response = await call_next(request)
+        response.headers["X-Trace-Id"] = trace_id
+        trace(trace_id, "http.request", method=request.method, path=path,
+              status=response.status_code, ms=int((time.perf_counter() - started) * 1000))
         response.headers["X-Content-Type-Options"] = "nosniff"
         if protected:
             response.headers["Cache-Control"] = "no-store"
@@ -183,12 +203,13 @@ def create_app(settings=None):
                 "ready": settings.model.is_file(),
             },
             "access_mode": "demo" if settings.demo else "token",
+            "url_ingest": True,
             "max_upload_bytes": settings.max_upload,
             "max_duration_s": settings.max_duration,
         }
 
     @app.post("/v1/media", status_code=201, response_model=MediaRecord)
-    def upload(file: UploadFile = File(...)):
+    def upload(request: Request, file: UploadFile = File(...)):
         name = Path((file.filename or "clip").replace("\\", "/")).name[:200]
         suffix = Path(name).suffix.lower()
         if suffix not in FORMATS:
@@ -222,15 +243,72 @@ def create_app(settings=None):
                         digest.hexdigest(),
                     ),
                 ).fetchone()
+            trace(request.state.trace_id, "media.uploaded", media_id=str(identity),
+                  name=name, size=size, duration_s=metadata["duration_s"])
             return public_media(row)
         except ValueError as exc:
             target.unlink(missing_ok=True)
+            trace(request.state.trace_id, "media.upload.invalid", level="warn",
+                  filename=name, error=str(exc))
             raise HTTPException(422, str(exc)) from exc
         except BaseException:
             target.unlink(missing_ok=True)
             raise
         finally:
             file.file.close()
+
+    @app.post("/v1/media/url", status_code=202, response_model=IngestRecord)
+    def ingest_url(body: IngestRequest, idempotency_key: str = Header(min_length=1, max_length=200)):
+        """Fetch a remote video (YouTube and other sites) and ingest it as media."""
+        trace_id = new_trace_id("ing")
+        with connect(settings) as conn:
+            conn.execute("SELECT pg_advisory_xact_lock(710203)")
+            old = conn.execute(
+                "SELECT id,url FROM media_ingests WHERE idempotency_key=%s", (idempotency_key,)
+            ).fetchone()
+            if old:
+                if old["url"] != body.url:
+                    raise HTTPException(
+                        409, "Idempotency key was already used with different input"
+                    )
+                return ingest_record(conn, old["id"])
+            pending = conn.execute(
+                "SELECT count(*) AS n FROM media_ingests WHERE status='downloading'"
+            ).fetchone()["n"]
+            if pending >= 2:
+                raise HTTPException(429, "Another download is in progress; try again shortly")
+            identity = uuid4()
+            conn.execute(
+                "INSERT INTO media_ingests(id,url,idempotency_key) VALUES(%s,%s,%s)",
+                (identity, body.url, idempotency_key),
+            )
+        trace(trace_id, "ingest.created", url=body.url, ingest_id=str(identity))
+        ingest_pool.submit(ingest_module.download_media, settings, str(identity), body.url, trace_id)
+        with connect(settings) as conn:
+            return ingest_record(conn, identity)
+
+    @app.get("/v1/media-ingests/{identity}", response_model=IngestRecord)
+    def media_ingest(identity: UUID):
+        with connect(settings) as conn:
+            return ingest_record(conn, identity)
+
+    def ingest_record(conn, identity) -> dict:
+        row = required(
+            conn.execute("SELECT * FROM media_ingests WHERE id=%s", (identity,)).fetchone()
+        )
+        media = None
+        if row["media_id"]:
+            media = conn.execute(
+                "SELECT * FROM media WHERE id=%s", (row["media_id"],)
+            ).fetchone()
+        return {
+            "id": row["id"],
+            "url": row["url"],
+            "status": row["status"],
+            "error": row["error"],
+            "media": public_media(media) if media else None,
+            "created_at": row["created_at"],
+        }
 
     @app.get("/v1/media/{identity}", response_model=MediaRecord)
     def media(identity: UUID):
@@ -248,7 +326,7 @@ def create_app(settings=None):
         return FileResponse(row["playback_path"], media_type="video/mp4")
 
     @app.post("/v1/jobs", status_code=202, response_model=JobRecord)
-    def submit(body: JobRequest, idempotency_key: str = Header(min_length=1, max_length=200)):
+    def submit(request: Request, body: JobRequest, idempotency_key: str = Header(min_length=1, max_length=200)):
         config = body.config.model_dump(mode="json")
         fingerprint = hashlib.sha256(
             json.dumps(body.model_dump(mode="json"), sort_keys=True).encode()
@@ -282,6 +360,8 @@ def create_app(settings=None):
                 "INSERT INTO jobs(id,media_id,idempotency_key,request_hash,config) VALUES(%s,%s,%s,%s,%s)",
                 (identity, body.media_id, idempotency_key, fingerprint, Jsonb(config)),
             )
+            trace(request.state.trace_id, "job.submitted", job_id=str(identity),
+                  media_id=str(body.media_id), config=config)
             return conn.execute(JOB_SELECT + " WHERE j.id=%s", (identity,)).fetchone()
 
     @app.get("/v1/jobs", response_model=JobList)

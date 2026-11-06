@@ -9,6 +9,7 @@ Errors use `{detail: string | validation_errors}`. Files never reveal server pat
 
 - `GET /v1/capabilities` → `{activities:[{id,name,description,status}], classes:[string], config_schema:object, model:{name,sha256,ready}, access_mode, max_upload_bytes, max_duration_s}`.
 - `POST /v1/media` multipart field `file` → 201 `{id,name,duration_s,width,height,codec,size_bytes,sha256}`. Validate actual media, not MIME alone. 413 oversized, 422 invalid/unsupported.
+- `POST /v1/media/url` JSON `{url}` (http/https) with mandatory `Idempotency-Key` header → 202 `{id,url,status:"downloading"|"ready"|"failed",error,media,created_at}`. Fetches the video server-side (YouTube and other yt-dlp-supported sites) into media storage; same validation as upload applies to the downloaded file. Same key+URL returns the same ingest; changed URL 409; 429 while two downloads are in flight. `GET /v1/media-ingests/{id}` polls status; when `ready`, `media` holds the created MediaRecord.
 - `GET /v1/media/{id}` → same metadata plus `playback_ready:boolean`.
 - `GET /v1/media/{id}/video` → authenticated range-supporting MP4; 409 while proxy unavailable.
 - `POST /v1/jobs` JSON `{media_id,config}`, mandatory `Idempotency-Key` header → 202 job. Same key+payload returns same job; changed payload 409; queue full 429.

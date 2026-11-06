@@ -19,11 +19,14 @@ def connect(settings, **kwargs):
 def migrate(settings):
     with connect(settings) as conn:
         conn.execute("SELECT pg_advisory_xact_lock(710200)")
-        conn.execute((ROOT / "migrations/001_workbench.sql").read_text())
+        for path in sorted((ROOT / "migrations").glob("*.sql")):
+            conn.execute(path.read_text())
 
 
 if __name__ == "__main__":
     from .settings import Settings
 
     migrate(Settings())
-    print("Database schema ready (version 1)")
+    with connect(Settings()) as conn:
+        version = conn.execute("SELECT max(version) AS v FROM schema_version").fetchone()["v"]
+    print(f"Database schema ready (version {version})")

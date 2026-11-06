@@ -174,3 +174,35 @@ def test_event_overlap_pagination_and_append_only_review(settings, video):
         detail = client.get(f"/v1/events/{ids[1]}").json()
         assert detail["review_status"] == "uncertain" and detail["summary"] == "fixture"
         assert [r["verdict"] for r in detail["reviews"]] == ["rejected", "uncertain"]
+
+
+def test_url_ingest_validation_idempotency_and_polling(settings, monkeypatch):
+    # Keep the ingest executor offline: the download step is exercised manually.
+    monkeypatch.setattr("avalokan.ingest.download_media", lambda *args, **kwargs: None)
+    with TestClient(create_app(settings)) as client:
+        assert client.post(
+            "/v1/media/url", json={"url": "ftp://example.com/clip.mp4"},
+            headers={"Idempotency-Key": "ing-1"},
+        ).status_code == 422
+
+        first = client.post(
+            "/v1/media/url", json={"url": "https://example.com/cctv.mp4"},
+            headers={"Idempotency-Key": "ing-1"},
+        )
+        assert first.status_code == 202, first.text
+        body = first.json()
+        assert body["status"] == "downloading" and body["media"] is None and body["error"] is None
+
+        again = client.post(
+            "/v1/media/url", json={"url": "https://example.com/cctv.mp4"},
+            headers={"Idempotency-Key": "ing-1"},
+        )
+        assert again.status_code == 202 and again.json()["id"] == body["id"]
+        conflict = client.post(
+            "/v1/media/url", json={"url": "https://example.com/other.mp4"},
+            headers={"Idempotency-Key": "ing-1"},
+        )
+        assert conflict.status_code == 409
+
+        assert client.get(f"/v1/media-ingests/{body['id']}").json()["url"] == "https://example.com/cctv.mp4"
+        assert client.get("/v1/media-ingests/00000000-0000-0000-0000-000000000000").status_code == 404

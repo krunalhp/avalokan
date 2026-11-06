@@ -29,6 +29,16 @@ class Settings:
         return self.data / "models/yolox_nano.onnx"
 
     @property
+    def cookies_file(self):
+        """Netscape cookies.txt for sites that block datacenter downloads.
+
+        Set AVALOKAN_YTDLP_COOKIES to a custom path or place the file at
+        .data/secrets/youtube-cookies.txt. Never committed to Git.
+        """
+        override = os.getenv("AVALOKAN_YTDLP_COOKIES", "")
+        return Path(override) if override else self.data / "secrets/youtube-cookies.txt"
+
+    @property
     def allowed(self):
         from .activities import REGISTRY
 

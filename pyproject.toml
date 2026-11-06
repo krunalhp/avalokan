@@ -25,6 +25,7 @@ dependencies = [
     "torchvision>=0.21,<1",
     "ultralytics>=8.3,<9",
     "uvicorn>=0.34,<1",
+    "yt-dlp>=2026.10.26",
 ]
 
 [tool.uv]

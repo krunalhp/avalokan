@@ -17,6 +17,7 @@ export interface Capabilities {
   config_schema: Record<string, unknown>;
   model: { name: string; sha256: string; ready: boolean };
   access_mode: string;
+  url_ingest?: boolean;
   max_upload_bytes: number;
   max_duration_s: number;
 }
@@ -46,6 +47,16 @@ export interface JobConfig {
 }
 
 export type JobStatus = "queued" | "running" | "completed" | "failed";
+
+/** Progress of a remote-URL (e.g. YouTube) ingest, polled while downloading. */
+export interface MediaIngest {
+  id: string;
+  url: string;
+  status: "downloading" | "ready" | "failed";
+  error: string | null;
+  media: Media | null;
+  created_at: string;
+}
 
 export interface Job {
   id: string;
@@ -196,6 +207,15 @@ export const api = {
 
   media: (id: string, signal?: AbortSignal) => request<Media>("GET", `/v1/media/${enc(id)}`, { signal }),
   videoUrl: (id: string) => `/v1/media/${enc(id)}/video`,
+
+  ingestUrl: (url: string, idempotencyKey: string, signal?: AbortSignal) =>
+    request<MediaIngest>("POST", "/v1/media/url", {
+      body: { url },
+      headers: { "Idempotency-Key": idempotencyKey },
+      signal,
+    }),
+  ingest: (id: string, signal?: AbortSignal) =>
+    request<MediaIngest>("GET", `/v1/media-ingests/${enc(id)}`, { signal }),
 
   /** Multipart upload with progress, via XHR (fetch has no upload progress). */
   uploadMedia(file: File, onProgress: (fraction: number) => void, signal: AbortSignal): Promise<Media> {

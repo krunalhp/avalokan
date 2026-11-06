@@ -1,5 +1,6 @@
 """One supervised worker per database, one bounded child process per clip."""
 
+import json
 import signal
 import subprocess
 import sys
@@ -7,6 +8,8 @@ import time
 
 from .db import connect, migrate
 from .settings import Settings
+from .tracing import configure as configure_tracing
+from .tracing import event as trace
 
 
 def recover(conn):
@@ -32,7 +35,8 @@ def main():
         ]:
             raise SystemExit("Another worker already owns this database")
         recover(lock)
-        print("Worker ready", flush=True)
+        configure_tracing()
+        trace(None, "worker.ready")
         while True:
             row = lock.execute("""UPDATE jobs SET status='running',attempts=attempts+1,error=NULL
                 WHERE id=(SELECT id FROM jobs WHERE status='queued' ORDER BY created_at LIMIT 1)
@@ -41,7 +45,8 @@ def main():
                 time.sleep(0.5)
                 continue
             identity = str(row["id"])
-            print(f"Analyzing job {identity}", flush=True)
+            started = time.monotonic()
+            trace(identity, "job.start", attempt=row["attempts"])
             try:
                 # Same supervised service cgroup: a service restart kills the
                 # child too. The parent timeout kills/waits for the child.
@@ -56,16 +61,28 @@ def main():
                     # Native decoder logs may include file metadata; only emit a
                     # generic failure to API clients. Operator stderr is local.
                     print(result.stderr[-4000:], file=sys.stderr, flush=True)
+                    trace(identity, "job.engine_failed", level="error",
+                          returncode=result.returncode, stderr_tail=result.stderr[-1500:])
                     raise ValueError(
                         "Analysis failed: invalid timestamps/media, model failure, or resource limit. Check worker logs."
                     )
-                print(f"Completed job {identity}", flush=True)
+                try:
+                    stats = json.loads(result.stdout.strip().splitlines()[-1])
+                except (ValueError, IndexError):
+                    stats = {}
+                trace(identity, "job.completed",
+                      attempt=row["attempts"], seconds=round(time.monotonic() - started, 2),
+                      analyzed_frames=stats.get("analyzed_frames"),
+                      analysis_fps=stats.get("analysis_fps"),
+                      events=stats.get("event_count"))
             except (subprocess.TimeoutExpired, ValueError) as exc:
                 message = (
                     "Analysis exceeded the 15-minute job limit"
                     if isinstance(exc, subprocess.TimeoutExpired)
                     else str(exc)
                 )
+                trace(identity, "job.failed", level="error", attempt=row["attempts"],
+                      error=message, seconds=round(time.monotonic() - started, 2))
                 lock.execute(
                     "UPDATE jobs SET status='failed',error=%s,finished_at=now() WHERE id=%s AND status='running' AND attempts=%s",
                     (message, identity, row["attempts"]),
