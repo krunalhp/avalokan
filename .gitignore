@@ -1,0 +1,5 @@
+# Amp orb artifacts
+.amp/portals/*
+
+# Jupyter
+.ipynb_checkpoints/

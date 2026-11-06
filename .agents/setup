@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Orb setup for the Avalokan notebook repository.
+# Installs the Python toolchain the notebooks need (torch CPU, ultralytics,
+# OpenCV, Jupyter) so fresh orbs can run YOLO11_Tutorial.ipynb and
+# VideoAnalysis.ipynb without reinstalling anything.
+# Must be non-interactive, idempotent, and finish well under 20 minutes.
+
+step() { printf '\n[setup] %s (%ss elapsed)\n' "$*" "$SECONDS"; }
+
+step "Checking system packages (ffmpeg for video work)"
+if ! command -v ffmpeg >/dev/null 2>&1; then
+  sudo apt-get update -qq
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ffmpeg
+else
+  echo "ffmpeg already present: $(command -v ffmpeg)"
+fi
+
+step "Checking uv package manager"
+if ! command -v uv >/dev/null 2>&1; then
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$PATH"
+fi
+uv --version
+
+step "Installing CPU-only torch (PyTorch CPU index)"
+# Install torch first so ultralytics does not pull the much larger CUDA build.
+if python3 -c 'import torch' 2>/dev/null; then
+  echo "torch already installed: $(python3 -c 'import torch; print(torch.__version__)')"
+else
+  uv pip install --system torch --index-url https://download.pytorch.org/whl/cpu
+fi
+
+step "Installing ultralytics, OpenCV, and Jupyter"
+# ultralytics brings numpy and its other runtime deps; opencv-python is listed
+# for clarity since VideoAnalysis.ipynb uses cv2 directly.
+uv pip install --system ultralytics opencv-python jupyterlab ipykernel
+
+step "Verifying imports"
+python3 - <<'EOF'
+import cv2, numpy, torch, ultralytics
+print(f"torch {torch.__version__} (cuda available: {torch.cuda.is_available()})")
+print(f"ultralytics {ultralytics.__version__}")
+print(f"opencv {cv2.__version__}")
+print(f"numpy {numpy.__version__}")
+EOF
+
+step "Setup complete"

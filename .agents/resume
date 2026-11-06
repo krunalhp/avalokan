@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Orb resume for the Avalokan notebook repository.
+# There are no backing services or user-scoped credentials to reconnect, so
+# this only sanity-checks the preinstalled toolchain and exits quickly.
+
+python3 -c 'import torch, cv2, ultralytics' >/dev/null 2>&1 \
+  && echo "[resume] notebook toolchain OK" \
+  || echo "[resume] WARNING: notebook toolchain import failed; rerun .agents/setup"
+exit 0
