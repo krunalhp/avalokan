@@ -12,6 +12,10 @@ fi
 
 exec "$chrome" \
   --user-data-dir="$HOME/.config/google-chrome" \
+  --password-store=basic \
+  --test-type \
   --no-first-run \
   --no-default-browser-check \
+  --window-size=790,700 \
+  --window-position=2,2 \
   "https://www.youtube.com/"
